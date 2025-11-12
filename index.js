@@ -1,40 +1,86 @@
-// index.js
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
+const bodyParser = require("body-parser");
+const dns = require("dns");
+const { URL } = require("url");
+
 const app = express();
+const port = process.env.PORT || 3000;
 
-app.use(cors({ optionsSuccessStatus: 200 }));
-app.use(express.static("public"));
+app.use(cors());
+app.use(bodyParser.urlencoded({ extended: false }));
+app.use("/public", express.static(${process.cwd()}/public));
 
-// root route
+// Home route
 app.get("/", (req, res) => {
-  res.sendFile(__dirname + "/views/index.html");
+  res.sendFile(process.cwd() + "/views/index.html");
 });
 
-// test route
+// Simple test route
 app.get("/api/hello", (req, res) => {
   res.json({ greeting: "hello API" });
 });
 
-// ✅ Request Header Parser API endpoint
-app.get("/api/whoami", (req, res) => {
-  // Use x-forwarded-for or fall back to request socket
-  const ipaddress = req.headers["x-forwarded-for"]
-    ? req.headers["x-forwarded-for"].split(",")[0]
-    : req.socket.remoteAddress;
+// In-memory storage
+const urls = new Map();
+let counter = 1;
 
-  const language = req.headers["accept-language"];
-  const software = req.headers["user-agent"];
+// Helper function to validate URL format and hostname
+function isValidHttpUrl(input) {
+  let parsed;
+  try {
+    parsed = new URL(input);
+  } catch {
+    return false;
+  }
 
-  res.json({
-    ipaddress,
-    language,
-    software,
+  // Must start with http:// or https://
+  if (!/^https?:\/\//i.test(input)) return false;
+
+  // Must have a valid hostname
+  if (!parsed.hostname) return false;
+
+  return parsed;
+}
+
+// POST endpoint for URL shortening
+app.post("/api/shorturl", (req, res) => {
+  const { url } = req.body;
+
+  const parsed = isValidHttpUrl(url);
+  if (!parsed) {
+    return res.json({ error: "invalid url" });
+  }
+
+  // Check domain existence
+  dns.lookup(parsed.hostname, (err) => {
+    if (err) {
+      return res.json({ error: "invalid url" });
+    } else {
+      // Check if already stored
+      for (const [id, original] of urls.entries()) {
+        if (original === url) {
+          return res.json({ original_url: url, short_url: id });
+        }
+      }
+
+      const short_url = counter++;
+      urls.set(short_url, url);
+      return res.json({ original_url: url, short_url });
+    }
   });
 });
 
-// start server
-const listener = app.listen(process.env.PORT || 3000, () => {
-  console.log("Your app is listening on port " + listener.address().port);
+// GET redirect route
+app.get("/api/shorturl/:id", (req, res) => {
+  const id = Number(req.params.id);
+  const original = urls.get(id);
+  if (!original) return res.json({ error: "No short URL found" });
+  res.redirect(original);
+});
+
+// Start server
+app.listen(port, () => {
+  console.log(Listening on port ${port});
 });
